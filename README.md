@@ -185,4 +185,4 @@ MIT — see [LICENSE](LICENSE)
 
 ---
 
-**TSS_SendBitcoin makes Bitcoin payments programmable, scalable, and easy for everyone.** 
+**TSS: Bitcoin scripting made simple and open-source, scalable, and easy for everyone.** 
