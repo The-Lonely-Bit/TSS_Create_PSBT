@@ -1,0 +1,125 @@
+import os
+import requests
+from flask import Flask, request, jsonify
+from embit.transaction import Transaction, TransactionInput, TransactionOutput
+from embit.psbt import PSBT
+from embit.script import address_to_scriptpubkey, Script
+
+app = Flask(__name__)
+
+# ───────── Configuration (via environment variables) ─────────
+INDEXER_API_KEY      = os.getenv("INDEXER_API_KEY")
+INDEXER_BASE         = os.getenv(
+    "INDEXER_BASE",
+    "https://open-api-fractal.unisat.io/v1/indexer/inscription/info/"
+)
+MIN_UTXO_VALUE       = int(os.getenv("MIN_UTXO_VALUE", "330"))
+DEFAULT_FLAT_FEE     = int(os.getenv("DEFAULT_FLAT_FEE", "200"))
+SKIP_INSCRIPTIONS    = os.getenv("SKIP_INSCRIPTIONS", "false").lower() == "true"
+SKIP_546_UTXOS       = os.getenv("SKIP_546_UTXOS", "false").lower() == "true"
+
+
+@app.route('/create_psbt', methods=['POST'])
+def create_psbt():
+    try:
+        data = request.get_json() or {}
+
+        # Optionally fetch inscription UTXO if inscriptionId provided
+        if data.get("inscriptionId") and not data.get("utxos"):
+            if not INDEXER_API_KEY:
+                return jsonify({"error": "Missing INDEXER_API_KEY env var"}), 500
+            try:
+                hdr = {"Authorization": f"Bearer {INDEXER_API_KEY}"}
+                resp = requests.get(f"{INDEXER_BASE}{data['inscriptionId']}", headers=hdr)
+                resp.raise_for_status()
+                ut = resp.json()["data"]["utxo"]
+                data.setdefault("utxos", []).insert(0, {
+                    "txid": ut["txid"],
+                    "vout": ut["vout"],
+                    "value": ut["satoshi"],
+                    "scriptPubKey": ut["scriptPk"],
+                    "inscriptions": ut.get("inscriptions", [])
+                })
+            except Exception as e:
+                return jsonify({"error": f"Indexer fetch failed: {e}"}), 500
+
+        utxos   = data.get("utxos", [])
+        outputs = data.get("outputs", [])
+        flat_fee = data.get("fee")
+        fee_rate = data.get("fee_rate")
+
+        if not utxos or not outputs:
+            return jsonify({"error": "utxos and outputs are required"}), 400
+
+        # Normalize and filter UTXOs
+        candidates = []
+        for u in utxos:
+            sat = u.get("value", u.get("satoshi", 0))
+            spk = u.get("scriptPubKey") or u.get("scriptPk")
+            if not u.get("txid") or spk is None:
+                continue
+            if SKIP_INSCRIPTIONS and u.get("inscriptions"):
+                continue
+            if SKIP_546_UTXOS and sat == 546:
+                continue
+            if sat < MIN_UTXO_VALUE:
+                continue
+            candidates.append({"txid": u["txid"], "vout": u["vout"], "satoshi": sat, "scriptPubKey": spk})
+
+        if not candidates:
+            return jsonify({"error": "No UTXOs meet filter requirements"}), 400
+
+        # Compute total outputs
+        total_out = sum(o.get("amount", 0) for o in outputs)
+
+        # Select UTXOs greedily
+        sorted_utxos = sorted(candidates, key=lambda x: x["satoshi"], reverse=True)
+        selected, acc = [], 0
+        for u in sorted_utxos:
+            selected.append(u)
+            acc += u["satoshi"]
+            if acc >= total_out:
+                break
+        if acc < total_out:
+            return jsonify({"error": "Insufficient funds"}), 400
+
+        # Build PSBT inputs and outputs
+        txins = [TransactionInput(bytes.fromhex(u["txid"]), u["vout"]) for u in selected]
+        txouts = [
+            TransactionOutput(o["amount"], address_to_scriptpubkey(o["address"]))
+            for o in outputs
+        ]
+
+        # Calculate fee
+        if fee_rate is not None:
+            vsize = len(txins) + len(txouts) * 31 + 50
+            fee = int(float(fee_rate) * vsize) + 100
+        else:
+            fee = int(flat_fee) if flat_fee is not None else DEFAULT_FLAT_FEE
+
+        # Add change output
+        change = acc - total_out - fee
+        if change > 0:
+            spk_bytes = bytes.fromhex(selected[0]["scriptPubKey"])
+            txouts.append(TransactionOutput(change, Script(spk_bytes)))
+
+        # Build PSBT
+        tx = Transaction(vin=txins, vout=txouts)
+        psbt = PSBT(tx)
+        for i, u in enumerate(selected):
+            spk_bytes = bytes.fromhex(u["scriptPubKey"])
+            psbt.inputs[i].witness_utxo = TransactionOutput(u["satoshi"], Script(spk_bytes))
+
+        response = {"psbt": psbt.to_string(), "fee": fee, "change": change, "inputs_used": len(selected)}
+        if fee_rate is not None:
+            response.update({"fee_rate": float(fee_rate), "vsize": vsize})
+
+        return jsonify(response), 200
+    except Exception as e:
+        app.logger.error(f"Error creating PSBT: {str(e)}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    app.run(host="0.0.0.0", port=port, debug=True, threaded=True) 
