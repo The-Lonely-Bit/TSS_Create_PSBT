@@ -1,0 +1,53 @@
+{
+    "request1": {
+        "utxos": [
+            {
+                "txid": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "vout": 0,
+                "value": 10000,
+                "scriptPubKey": "0014abcdef1234567890abcdef1234567890abcdef12"
+            }
+        ],
+        "outputs": [
+            {
+                "address": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+                "amount": 9000
+            }
+        ],
+        "fee": 200
+    },
+    "request2": {
+        "utxos": [
+            {
+                "txid": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                "vout": 1,
+                "value": 20000,
+                "scriptPubKey": "0014abcdef1234567890abcdef1234567890abcdef12"
+            }
+        ],
+        "outputs": [
+            {
+                "address": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+                "amount": 18000
+            }
+        ],
+        "fee_rate": 1.5
+    },
+    "request3": {
+        "utxos": [
+            {
+                "txid": "7890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234",
+                "vout": 2,
+                "value": 50000,
+                "scriptPubKey": "0014abcdef1234567890abcdef1234567890abcdef12"
+            }
+        ],
+        "outputs": [
+            {
+                "address": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+                "amount": 45000
+            }
+        ],
+        "fee": 500
+    }
+} 
